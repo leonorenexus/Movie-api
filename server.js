@@ -9,24 +9,51 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
 
+const BLACKLIST = [
+  "news",
+  "youtube",
+  "twitch",
+  "meeting",
+  "council",
+  "agenda",
+  "broadcast",
+  "newscast",
+  "press",
+  "tv",
+  "radio",
+  "government"
+];
+
 async function getMovies(page = 1) {
   const { data } = await axios.get(
     "https://archive.org/advancedsearch.php",
     {
       params: {
-        q: "mediatype:(movies)",
-        fl: "identifier,title,year",
+        q: 'collection:(feature_films) AND mediatype:(movies)',
+        fl: 'identifier,title,year,description',
         rows: 100,
         page,
-        output: "json"
+        output: 'json',
+        sort: 'downloads desc'
       }
     }
   );
 
-  return (data.response.docs || []).map(movie => ({
+  let docs = data?.response?.docs || [];
+
+  docs = docs.filter(movie => {
+    const title = (movie.title || "").toLowerCase();
+
+    return !BLACKLIST.some(word =>
+      title.includes(word)
+    );
+  });
+
+  return docs.map(movie => ({
     id: movie.identifier,
     title: movie.title || "Untitled",
     year: movie.year || null,
+    description: movie.description || "",
     poster: `https://archive.org/services/img/${movie.identifier}`
   }));
 }
@@ -91,9 +118,46 @@ app.get("/api/movie/:id", async (req, res) => {
       id: identifier,
       title: data.metadata?.title || "",
       description: data.metadata?.description || "",
+      year: data.metadata?.year || null,
       poster: `https://archive.org/services/img/${identifier}`,
       streams
     });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+app.get("/api/search", async (req, res) => {
+  try {
+    const keyword = req.query.q || "";
+
+    const { data } = await axios.get(
+      "https://archive.org/advancedsearch.php",
+      {
+        params: {
+          q: `collection:(feature_films) AND title:(${keyword})`,
+          fl: "identifier,title,year",
+          rows: 50,
+          output: "json"
+        }
+      }
+    );
+
+    const results = (data.response.docs || []).map(movie => ({
+      id: movie.identifier,
+      title: movie.title,
+      year: movie.year || null,
+      poster: `https://archive.org/services/img/${movie.identifier}`
+    }));
+
+    res.json({
+      success: true,
+      results
+    });
+
   } catch (error) {
     res.status(500).json({
       success: false,
